@@ -1,11 +1,14 @@
-use std::ops::Range;
+use std::{collections::HashMap, ops::Range};
 
-use egui::{Color32, Painter, Pos2, Rect, Stroke, Vec2, Widget};
-use regex::{Captures, Regex};
+use egui::{Color32, Painter, Pos2, Rect, Stroke, Vec2};
 
 fn main() {
+    let icon = eframe::icon_data::from_png_bytes(include_bytes!("graphing_calc_icon.png")).expect("Icon image is invalid.");
+
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([800.0, 600.0]),
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([800.0, 600.0])
+            .with_icon(icon),
         ..Default::default()
     };
     match eframe::run_native(
@@ -28,12 +31,16 @@ struct GraphApp {
     grid_thickness: f32,
     grid_scaling: Vec2,
 
+    mini_lines: i16,
+
     origin_ui: Pos2,
 
     equation: String,
 
     drag_offset: Pos2,
     origin_offset: Pos2,
+
+    debug_values: HashMap<String, Vec2>,
 }
 
 impl Default for GraphApp {
@@ -44,12 +51,16 @@ impl Default for GraphApp {
             grid_thickness: 0.75,
             grid_scaling: Vec2::new(80.0, 40.0),
 
+            mini_lines: 5,
+
             origin_ui: Pos2::new(0.0, 0.0),
 
-            equation: "3*x".to_owned(),
+            equation: "signum(x)sin(X)-x".to_owned(),
 
             drag_offset: Pos2::ZERO,
             origin_offset: Pos2::ZERO,
+
+            debug_values: HashMap::new(),
         }
     }
 }
@@ -70,30 +81,39 @@ impl eframe::App for GraphApp {
         egui::Window::new("Debug Values")
             .resizable(true)
             .show(ctx, |ui| {
-                ui.label(format!("{}", self.origin_ui));
+                for dbg in self.debug_values.iter() {
+                    ui.collapsing(dbg.0, |ui| {
+                        ui.label(format!("{}", dbg.1));
+                    });
+                }
             });
         egui::CentralPanel::default().show(ctx, |ui| {
             if ctx.input(|i| {
-                i.pointer.button_pressed(egui::PointerButton::Middle)
+                i.pointer.button_pressed(egui::PointerButton::Middle) ||
+                i.pointer.button_pressed(egui::PointerButton::Secondary)
             }) {
                 self.origin_offset = self.origin_ui;
                 self.drag_offset = ctx.input(|i| { i.pointer.latest_pos().unwrap_or(Pos2::ZERO) });
             }
 
-            if ctx.input(|i| i.pointer.button_down(egui::PointerButton::Middle)) {
+            if ctx.input(|i| {
+                i.pointer.button_down(egui::PointerButton::Middle) ||
+                i.pointer.button_down(egui::PointerButton::Secondary)
+            }) {
                 self.origin_ui = ctx.input(|i| { i.pointer.latest_pos().unwrap_or(Pos2::ZERO) }) - self.drag_offset.to_vec2() + self.origin_offset.to_vec2();
             }
-            self.grid_scaling += Vec2::new(1.0, 1.0) * ctx.input(|i| i.smooth_scroll_delta.y) * 0.05;
+            self.grid_scaling += Vec2::UP * ctx.input(|i| i.raw_scroll_delta.y) * 0.05;
+            self.grid_scaling += Vec2::RIGHT * ctx.input(|i| i.raw_scroll_delta.x) * 0.05;
 
-            let rect = ui.available_rect_before_wrap();
+            let size = ui.available_size();
             let painter = ui.painter();
 
-            painter.rect_filled(rect, 0.0, self.background_color);
+            painter.rect_filled(Rect::from_two_pos(Pos2::ZERO, size.to_pos2()), 0.0, self.background_color);
 
-            self.draw_grid(painter, rect);
-            self.draw_curve(painter, rect, self.get_function_points(Function::new(), 0.0..10.0, 0.01), (2.0, Color32::RED).into());
-            painter.arrow(self.origin_ui, Vec2::new(0.0, -self.grid_scaling.y), (3.0, Color32::BLUE));
-            painter.arrow(self.origin_ui, Vec2::new(self.grid_scaling.x, 0.0), (3.0, Color32::BLUE));
+            self.draw_grid(painter, size);
+            let top_left_gridspace = self.ui_to_grid(Pos2::new(0.0, 0.0));
+            let bottom_right_gridspace = self.ui_to_grid(Pos2::new(size.x, size.y));
+            self.draw_curve(painter, self.get_function_points(Function::new(), top_left_gridspace.x..bottom_right_gridspace.x, 1000.0), (2.0, Color32::RED).into());
         });
     }
 }
@@ -106,7 +126,14 @@ impl GraphApp {
         )
     }
 
-    fn draw_curve(&self, painter: &Painter, rect: Rect, points: Vec<Pos2>, stroke: Stroke) {
+    fn ui_to_grid(&self, ui_point: Pos2) -> Pos2 {
+        Pos2::new(
+            (ui_point.x - self.origin_ui.x) / self.grid_scaling.x,
+            (ui_point.y - self.origin_ui.y) / -self.grid_scaling.y,
+        )
+    }
+
+    fn draw_curve(&self, painter: &Painter, points: Vec<Pos2>, stroke: Stroke) {
         let mut prev: Option<Pos2> = Option::None;
         for point in points {
             let gui_point = self.grid_to_ui(point);
@@ -120,30 +147,102 @@ impl GraphApp {
         }
     }
 
-    fn draw_grid(&self, painter: &Painter, rect: Rect) {
-        let mut x = self.origin_ui.x % self.grid_scaling.x;
-        while x <= rect.right() {
+    fn get_units_per_line(&mut self, screen_size: Vec2) -> Vec2 {
+        let units_on_screen = Vec2::new(
+            screen_size.x / self.grid_scaling.x,
+            screen_size.y / self.grid_scaling.y
+        );
+        let mut lines_on_screen = Vec2::new(
+            (self.mini_lines as f32).powf(units_on_screen.x.log(self.mini_lines as f32).floor()),
+            (self.mini_lines as f32).powf(units_on_screen.y.log(self.mini_lines as f32).floor())
+        );
+        lines_on_screen = Vec2::new(1.0, 1.0) / lines_on_screen;
+        lines_on_screen = lines_on_screen * Vec2::new(self.mini_lines as f32, self.mini_lines as f32);
+        let size = Vec2::new(
+            self.grid_scaling.x / lines_on_screen.x,
+            self.grid_scaling.y / lines_on_screen.y
+        );
+        self.debug_values.insert(
+            "Screen size".to_string(),
+            size
+        );
+        self.debug_values.insert(
+            "Scaling".to_string(),
+            self.grid_scaling
+        );
+        self.debug_values.insert(
+            "Lines count".to_string(),
+            lines_on_screen
+        );
+        self.debug_values.insert(
+            "Pixels between lines".to_string(),
+            size
+        );
+        size
+    }
+
+    fn draw_grid(&mut self, painter: &Painter, size: Vec2) {
+        let spacing = self.get_units_per_line(size);
+        let mut x = self.origin_ui.x;
+        let mut x_count = 0;
+
+        while x <= size.x {
             let mut thickness = self.grid_thickness;
-            if f32::abs(x - self.origin_ui.x) < 1.0 {
+            if x_count == 0 {
                 thickness = 5.0;
             }
-            painter.line_segment([Pos2::new(x, rect.top()), Pos2::new(x, rect.bottom())], (thickness, self.grid_color));
-            x += self.grid_scaling.x;
+            else if x_count % self.mini_lines == 0 {
+                thickness = 2.0;
+            }
+            painter.line_segment([Pos2::new(x, 0.0), Pos2::new(x, size.y)], (thickness, self.grid_color));
+            
+            x += spacing.x;
+            x_count += 1;
+        }
+        x = self.origin_ui.x + spacing.x;
+        x_count = 1;
+        while x >= 0.0 {
+            let mut thickness = self.grid_thickness;
+            if x_count % self.mini_lines == 0 {
+                thickness = 2.0;
+            }
+            painter.line_segment([Pos2::new(x, 0.0), Pos2::new(x, size.y)], (thickness, self.grid_color));
+            
+            x -= spacing.x;
+            x_count += 1;
         }
 
-        let mut y = self.origin_ui.y % self.grid_scaling.y;
-        while y <= rect.bottom() {
+        let mut y = self.origin_ui.y;
+        let mut y_count = 0;
+        while y <= size.y {
             let mut thickness = self.grid_thickness;
-            if f32::abs(y - self.origin_ui.y) < 1.0 {
+            if y_count == 0 {
                 thickness = 5.0;
             }
-            painter.line_segment([Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)], (thickness, self.grid_color));
-            y += self.grid_scaling.y;
+            else if y_count % self.mini_lines == 0 {
+                thickness = 2.0;
+            }
+            painter.line_segment([Pos2::new(0.0, y), Pos2::new(size.x, y)], (thickness, self.grid_color));
+            
+            y += spacing.y;
+            y_count += 1;
+        }
+        y = self.origin_ui.y + spacing.y;
+        y_count = 1;
+        while y >= 0.0 {
+            let mut thickness = self.grid_thickness;
+            if y_count % self.mini_lines == 0 {
+                thickness = 2.0;
+            }
+            painter.line_segment([Pos2::new(0.0, y), Pos2::new(size.x, y)], (thickness, self.grid_color));
+            y -= spacing.y;
+            y_count += 1;
         }
     }
 
     fn get_function_points(&self, func: Function, domain: Range<f32>, resolution: f32) -> Vec<Pos2> {
         let mut points: Vec<Pos2> = Vec::new();
+        let addend = (domain.end - domain.start) / resolution;
 
         let mut x = domain.start;
         while x < domain.end {
@@ -151,26 +250,23 @@ impl GraphApp {
                 x, 
                 func.eval(x)
             ));
-            x += resolution;
+            x += addend;
         }
         points
     }
 }
 
 struct Function {
-    color: Color32,
-    width: f32,
+
 }
 
 impl Function {
     pub fn new() -> Self {
         Self {
-            color: Color32::RED,
-            width: 4.0,
         }
     }
 
     pub fn eval(&self, x: f32)  -> f32 {
-        return f32::sin(x);
+        return x.signum() * f32::sin(x) - x.abs();
     }
 }
