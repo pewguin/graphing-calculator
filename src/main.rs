@@ -56,7 +56,7 @@ impl Default for GraphApp {
             background_color: Color32::BLACK,
             grid_color: Color32::from_gray(100),
             grid_thickness: 0.75,
-            grid_scaling: Vec2::new(80.0, 40.0),
+            grid_scaling: Vec2::new(80.0, 80.0),
 
             mini_lines: 5,
 
@@ -133,10 +133,10 @@ impl eframe::App for GraphApp {
             let scroll = ctx.input(|i| i.raw_scroll_delta.y);
             
             if scroll > 0.0 {
-                self.grid_scaling *= scroll;
+                self.grid_scaling *= scroll.powf(1.0/23.0);
             }
             else if scroll < 0.0 {
-                self.grid_scaling *= 1.0/-scroll;
+                self.grid_scaling *= 1.0/scroll.abs().powf(1.0/23.0);
             }
 
             let size = ui.available_size();
@@ -168,17 +168,9 @@ impl GraphApp {
     }
 
     fn draw_curve(&self, painter: &Painter, points: Vec<Pos2>, stroke: Stroke) {
-        let mut prev: Option<Pos2> = Option::None;
-        for point in points {
-            let gui_point = self.grid_to_ui(point);
-            match prev {
-                Some(prev) => {
-                    painter.line_segment([gui_point, prev], stroke);
-                },
-                _ => {}
-            }
-            prev = Some(gui_point);
-        }
+        painter.line(points.iter().map(|point| {
+            self.grid_to_ui(*point)
+        }).collect(), stroke);
     }
 
     fn get_units_per_line(&mut self, screen_size: Vec2) -> Vec2 {
