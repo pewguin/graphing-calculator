@@ -1,6 +1,13 @@
+mod parsing {
+    pub mod function;
+    pub mod ast;
+}
+
 use std::{collections::HashMap, ops::Range};
 
-use egui::{Color32, Painter, Pos2, Rect, Stroke, Vec2};
+use egui::{style, widget_text, Color32, ComboBox, Painter, Pos2, Rect, RichText, Stroke, Style, Vec2, WidgetText};
+
+use parsing::function::Function;
 
 fn main() {
     let icon = eframe::icon_data::from_png_bytes(include_bytes!("graphing_calc_icon.png")).expect("Icon image is invalid.");
@@ -69,14 +76,35 @@ impl eframe::App for GraphApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         ctx.set_pixels_per_point(1.0);
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
-            ui.heading("Graphing Calculator");
+            ui.horizontal(|ui| {
+                ui.heading("Graphing Calculator");
+                let mut selected_option = -1;
+                ComboBox::from_label("").selected_text("Graph").show_ui(ui, |ui| {
+                    ui.selectable_value(&mut selected_option, 0, "Reset Position");
+                    ui.selectable_value(&mut selected_option, 1, "Reset Scale");
+                });
+                match selected_option {
+                    -1 => {},
+                    0 => {
+                        self.origin_ui = Pos2::ZERO;
+                    },
+                    1 => {
+                        self.grid_scaling = Vec2::new(80.0, 80.0);
+                    },
+                    _ => {
+                        println!("Selected option from Graph dropdown is not valid!");
+                    }
+                }
+            });
         });
         egui::Window::new("Equations")
             .resizable(true)
             .show(ctx, |ui| {
-                let equation_label = ui.label("");
-                ui.text_edit_singleline(&mut self.equation)
-                    .labelled_by(equation_label.id);
+                ui.horizontal(|ui| {
+                    let equation_label = ui.label("y=");
+                    ui.text_edit_singleline(&mut self.equation)
+                        .labelled_by(equation_label.id);
+                })
             });
         egui::Window::new("Debug Values")
             .resizable(true)
@@ -102,8 +130,14 @@ impl eframe::App for GraphApp {
             }) {
                 self.origin_ui = ctx.input(|i| { i.pointer.latest_pos().unwrap_or(Pos2::ZERO) }) - self.drag_offset.to_vec2() + self.origin_offset.to_vec2();
             }
-            self.grid_scaling += Vec2::UP * ctx.input(|i| i.raw_scroll_delta.y) * 0.05;
-            self.grid_scaling += Vec2::RIGHT * ctx.input(|i| i.raw_scroll_delta.x) * 0.05;
+            let scroll = ctx.input(|i| i.raw_scroll_delta.y);
+            
+            if scroll > 0.0 {
+                self.grid_scaling *= scroll;
+            }
+            else if scroll < 0.0 {
+                self.grid_scaling *= 1.0/-scroll;
+            }
 
             let size = ui.available_size();
             let painter = ui.painter();
@@ -113,7 +147,7 @@ impl eframe::App for GraphApp {
             self.draw_grid(painter, size);
             let top_left_gridspace = self.ui_to_grid(Pos2::new(0.0, 0.0));
             let bottom_right_gridspace = self.ui_to_grid(Pos2::new(size.x, size.y));
-            self.draw_curve(painter, self.get_function_points(Function::new(), top_left_gridspace.x..bottom_right_gridspace.x, 1000.0), (2.0, Color32::RED).into());
+            self.draw_curve(painter, self.get_function_points(Function::new(&self.equation), top_left_gridspace.x..bottom_right_gridspace.x, 1000.0), (2.0, Color32::RED).into());
         });
     }
 }
@@ -183,6 +217,7 @@ impl GraphApp {
 
     fn draw_grid(&mut self, painter: &Painter, size: Vec2) {
         let spacing = self.get_units_per_line(size);
+
         let mut x = self.origin_ui.x;
         let mut x_count = 0;
 
@@ -199,7 +234,7 @@ impl GraphApp {
             x += spacing.x;
             x_count += 1;
         }
-        x = self.origin_ui.x + spacing.x;
+        x = self.origin_ui.x - spacing.x;
         x_count = 1;
         while x >= 0.0 {
             let mut thickness = self.grid_thickness;
@@ -214,6 +249,7 @@ impl GraphApp {
 
         let mut y = self.origin_ui.y;
         let mut y_count = 0;
+
         while y <= size.y {
             let mut thickness = self.grid_thickness;
             if y_count == 0 {
@@ -227,7 +263,7 @@ impl GraphApp {
             y += spacing.y;
             y_count += 1;
         }
-        y = self.origin_ui.y + spacing.y;
+        y = self.origin_ui.y - spacing.y;
         y_count = 1;
         while y >= 0.0 {
             let mut thickness = self.grid_thickness;
@@ -253,20 +289,5 @@ impl GraphApp {
             x += addend;
         }
         points
-    }
-}
-
-struct Function {
-
-}
-
-impl Function {
-    pub fn new() -> Self {
-        Self {
-        }
-    }
-
-    pub fn eval(&self, x: f32)  -> f32 {
-        return x.signum() * f32::sin(x) - x.abs();
     }
 }
