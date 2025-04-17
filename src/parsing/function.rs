@@ -1,13 +1,20 @@
-use crate::parsing::ast::{Node, UnaryOperator, BinaryOperator, Parser};
+use crate::parsing::{ast::*, parser::*};
 
+#[derive(Clone)]
 pub struct Function {
     ast_head: Box<Node>,
 }
 
 impl Function {
-    pub fn new(function: &str) -> Self {
-        Self {
-            ast_head: Parser::parse_string(function)
+    pub fn new(function: &str) -> Option<Self> {
+        let mut lex = Lexer::new();
+        let head = Parser::parse(lex.tokenize(function.to_string()));
+        if (head.is_some()) {
+            Some(Self {
+                ast_head: head.unwrap()
+            })
+        } else {
+            None
         }
     }
 
@@ -18,7 +25,7 @@ impl Function {
     fn eval_recursive(&self, x: f32, node: &Node) -> f32 {
         match node {
             Node::Constant(i) => *i,
-            Node::Variable(i) => x,
+            Node::Variable(_) => x,
             Node::UnaryOperator { operator, operand } => match operator {
                 UnaryOperator::Negation => -self.eval_recursive(x, operand),
                 UnaryOperator::AbsoluteValue => self.eval_recursive(x, operand).abs(),

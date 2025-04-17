@@ -1,6 +1,9 @@
+#![allow(unused)]
+
 mod parsing {
     pub mod function;
     pub mod ast;
+    pub mod parser;
 }
 
 use std::{collections::HashMap, ops::Range};
@@ -42,7 +45,8 @@ struct GraphApp {
 
     origin_ui: Pos2,
 
-    equation: String,
+    function: Function,
+    function_str: String,
 
     drag_offset: Pos2,
     origin_offset: Pos2,
@@ -62,7 +66,8 @@ impl Default for GraphApp {
 
             origin_ui: Pos2::new(0.0, 0.0),
 
-            equation: "signum(x)sin(X)-x".to_owned(),
+            function: Function::new("x").unwrap(),
+            function_str: String::from("x"),
 
             drag_offset: Pos2::ZERO,
             origin_offset: Pos2::ZERO,
@@ -102,8 +107,15 @@ impl eframe::App for GraphApp {
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     let equation_label = ui.label("y=");
-                    ui.text_edit_singleline(&mut self.equation)
-                        .labelled_by(equation_label.id);
+                    if ui.text_edit_singleline(&mut self.function_str)
+                        .labelled_by(equation_label.id)
+                        .changed() {
+                        let new_func = Function::new(&self.function_str);
+                        match new_func {
+                            Some(func) => self.function = func,
+                            None => ()
+                        }
+                    }
                 })
             });
         egui::Window::new("Debug Values")
@@ -147,7 +159,8 @@ impl eframe::App for GraphApp {
             self.draw_grid(painter, size);
             let top_left_gridspace = self.ui_to_grid(Pos2::new(0.0, 0.0));
             let bottom_right_gridspace = self.ui_to_grid(Pos2::new(size.x, size.y));
-            self.draw_curve(painter, self.get_function_points(Function::new(&self.equation), top_left_gridspace.x..bottom_right_gridspace.x, 1000.0), (2.0, Color32::RED).into());
+            let func = self.function.clone();
+            self.draw_curve(painter, self.get_function_points(func, top_left_gridspace.x..bottom_right_gridspace.x, 1000.0), (2.0, Color32::RED).into());
         });
     }
 }
