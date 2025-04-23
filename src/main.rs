@@ -118,9 +118,12 @@ impl eframe::App for GraphApp {
                     }
                 })
             });
-        egui::Window::new("Debug Values")
+        egui::Window::new("Debug")
             .resizable(true)
             .show(ctx, |ui| {
+                if ui.button("Log function information").clicked() {
+                    println!();
+                }
                 for dbg in self.debug_values.iter() {
                     ui.collapsing(dbg.0, |ui| {
                         ui.label(format!("{}", dbg.1));
