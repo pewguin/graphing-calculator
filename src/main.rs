@@ -8,7 +8,7 @@ mod parsing {
 
 use std::{collections::HashMap, ops::Range};
 
-use egui::{style, widget_text, Color32, ComboBox, Painter, Pos2, Rect, RichText, Stroke, Style, Vec2, WidgetText};
+use egui::{style, widget_text, Color32, ComboBox, Painter, Pos2, Rect, RichText, Sense, Stroke, Style, Vec2, WidgetText};
 
 use parsing::function::Function;
 
@@ -21,22 +21,22 @@ fn main() {
             .with_icon(icon),
         ..Default::default()
     };
-    match eframe::run_native(
-        "Graphing Calculator", 
-        options, 
+    eframe::run_native(
+        "Graphing Calculator",
+        options,
         Box::new(|_ccl| {
             Ok(Box::<GraphApp>::default())
         })
-    ) {
-        Ok(window) => window,
-        Err(error) => {
-            println!("{}", error.to_string());
-        }
-    }
+    ).unwrap_or_else(|error| {
+        println!("{}", error.to_string());
+    })
 }
 
 struct GraphApp {
     background_color: Color32,
+    grid_origin: Vec2,
+    grid_size: Vec2,
+
     grid_color: Color32,
     grid_thickness: f32,
     grid_scaling: Vec2,
@@ -58,6 +58,9 @@ impl Default for GraphApp {
     fn default() -> Self {
         Self {
             background_color: Color32::BLACK,
+            grid_origin: Vec2::ZERO,
+            grid_size: Vec2::ZERO,
+
             grid_color: Color32::from_gray(100),
             grid_thickness: 0.75,
             grid_scaling: Vec2::new(80.0, 80.0),
@@ -66,8 +69,8 @@ impl Default for GraphApp {
 
             origin_ui: Pos2::new(0.0, 0.0),
 
-            function: Function::new("x").unwrap(),
-            function_str: String::from("x"),
+            function: Function::new("x*x").unwrap(),
+            function_str: String::from("x*x"),
 
             drag_offset: Pos2::ZERO,
             origin_offset: Pos2::ZERO,
@@ -91,7 +94,11 @@ impl eframe::App for GraphApp {
                 match selected_option {
                     -1 => {},
                     0 => {
-                        self.origin_ui = Pos2::ZERO;
+                        self.origin_ui = (self.grid_size.to_pos2() + self.grid_origin) / 2.0;
+                        self.debug_values.insert(
+                            "Reset Pos".to_string(),
+                            self.origin_ui.to_vec2(),
+                        );
                     },
                     1 => {
                         self.grid_scaling = Vec2::new(80.0, 80.0);
@@ -154,14 +161,18 @@ impl eframe::App for GraphApp {
                 self.grid_scaling *= 1.0/scroll.abs().powf(1.0/23.0);
             }
 
-            let size = ui.available_size();
+            let response = ui.allocate_response(ui.available_size(), Sense::all());
+            let rect = response.rect;
             let painter = ui.painter();
 
-            painter.rect_filled(Rect::from_two_pos(Pos2::ZERO, size.to_pos2()), 0.0, self.background_color);
+            self.grid_origin = rect.min.to_vec2();
+            self.grid_size = rect.size();
 
-            self.draw_grid(painter, size);
-            let top_left_gridspace = self.ui_to_grid(Pos2::new(0.0, 0.0));
-            let bottom_right_gridspace = self.ui_to_grid(Pos2::new(size.x, size.y));
+            painter.rect_filled(Rect::from_two_pos(rect.min, rect.max), 0.0, self.background_color);
+
+            self.draw_grid(painter, rect);
+            let top_left_gridspace = self.ui_to_grid(rect.min);
+            let bottom_right_gridspace = self.ui_to_grid(rect.max);
             let func = self.function.clone();
             self.draw_curve(painter, self.get_function_points(func, top_left_gridspace.x..bottom_right_gridspace.x, 1000.0), (2.0, Color32::RED).into());
         });
@@ -171,15 +182,15 @@ impl eframe::App for GraphApp {
 impl GraphApp {
     fn grid_to_ui(&self, grid_point: Pos2) -> Pos2 {
         Pos2::new(
-            (grid_point.x * self.grid_scaling.x) + self.origin_ui.x,
-            (-grid_point.y * self.grid_scaling.y) + self.origin_ui.y
+            (grid_point.x * self.grid_scaling.x) + self.origin_ui.x + self.grid_origin.x,
+            (-grid_point.y * self.grid_scaling.y) + self.origin_ui.y + self.grid_origin.y
         )
     }
 
     fn ui_to_grid(&self, ui_point: Pos2) -> Pos2 {
         Pos2::new(
-            (ui_point.x - self.origin_ui.x) / self.grid_scaling.x,
-            (ui_point.y - self.origin_ui.y) / -self.grid_scaling.y,
+            (ui_point.x - self.origin_ui.x - self.grid_origin.x) / self.grid_scaling.x,
+            (ui_point.y - self.origin_ui.y - self.grid_origin.y) / -self.grid_scaling.y,
         )
     }
 
@@ -223,64 +234,62 @@ impl GraphApp {
         size
     }
 
-    fn draw_grid(&mut self, painter: &Painter, size: Vec2) {
-        let spacing = self.get_units_per_line(size);
+    fn draw_grid(&mut self, painter: &Painter, rect: Rect) {
+        let spacing = self.get_units_per_line(rect.size());
+        let ui_origin = self.origin_ui + rect.min.to_vec2();
 
-        let mut x = self.origin_ui.x;
-        let mut x_count = 0;
+        let mut x = rect.min.x + self.origin_ui.x.rem_euclid(spacing.x);
+        let mini_lines_start = rect.min.x + self.origin_ui.x % (spacing.x * self.mini_lines as f32);
+        let mut x_count = ((x - mini_lines_start) / spacing.x) as i32;
 
-        while x <= size.x {
+        while x <= rect.max.x {
             let mut thickness = self.grid_thickness;
-            if x_count == 0 {
-                thickness = 5.0;
-            }
-            else if x_count % self.mini_lines == 0 {
+            if (x_count >= 0 && x_count % self.mini_lines as i32 == 0) {
                 thickness = 2.0;
             }
-            painter.line_segment([Pos2::new(x, 0.0), Pos2::new(x, size.y)], (thickness, self.grid_color));
+
+            painter.line_segment(
+                [Pos2::new(x, rect.min.y), 
+                    Pos2::new(x, rect.max.y)],
+                (thickness, self.grid_color));
             
             x += spacing.x;
             x_count += 1;
         }
-        x = self.origin_ui.x - spacing.x;
-        x_count = 1;
-        while x >= 0.0 {
-            let mut thickness = self.grid_thickness;
-            if x_count % self.mini_lines == 0 {
-                thickness = 2.0;
-            }
-            painter.line_segment([Pos2::new(x, 0.0), Pos2::new(x, size.y)], (thickness, self.grid_color));
-            
-            x -= spacing.x;
-            x_count += 1;
+
+        if (0.0 < self.origin_ui.x && self.origin_ui.x < rect.size().x) {
+            let x = self.origin_ui.x + rect.min.x;
+            painter.line_segment(
+                [Pos2::new(x, rect.min.y), 
+                Pos2::new(x, rect.max.y)], 
+                (5.0, self.grid_color));
         }
 
-        let mut y = self.origin_ui.y;
-        let mut y_count = 0;
+        let mut y = rect.min.y + self.origin_ui.y.rem_euclid(spacing.y);
+        let mini_lines_start = rect.min.y + self.origin_ui.y % (spacing.y * self.mini_lines as f32);
+        let mut y_count = ((y - mini_lines_start) / spacing.y) as i32;
 
-        while y <= size.y {
+        while y <= rect.max.y {
             let mut thickness = self.grid_thickness;
-            if y_count == 0 {
-                thickness = 5.0;
-            }
-            else if y_count % self.mini_lines == 0 {
+            if (y_count >= 0 && y_count % self.mini_lines as i32 == 0) {
                 thickness = 2.0;
             }
-            painter.line_segment([Pos2::new(0.0, y), Pos2::new(size.x, y)], (thickness, self.grid_color));
+
+            painter.line_segment(
+                [Pos2::new(rect.min.x, y), 
+                    Pos2::new(rect.max.x, y)],
+                (thickness, self.grid_color));
             
             y += spacing.y;
             y_count += 1;
         }
-        y = self.origin_ui.y - spacing.y;
-        y_count = 1;
-        while y >= 0.0 {
-            let mut thickness = self.grid_thickness;
-            if y_count % self.mini_lines == 0 {
-                thickness = 2.0;
-            }
-            painter.line_segment([Pos2::new(0.0, y), Pos2::new(size.x, y)], (thickness, self.grid_color));
-            y -= spacing.y;
-            y_count += 1;
+
+        if (0.0 < self.origin_ui.y && self.origin_ui.y < rect.size().y) {
+            let y = self.origin_ui.y + rect.min.y;
+            painter.line_segment(
+                [Pos2::new(rect.min.x, y ), 
+                Pos2::new(rect.max.x, y)], 
+                (5.0, self.grid_color));
         }
     }
 
