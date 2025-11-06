@@ -1,7 +1,6 @@
 #![allow(unused)]
 
 mod parsing {
-    pub mod function;
     pub mod ast;
     pub mod parser;
 }
@@ -9,10 +8,11 @@ mod parsing {
 use std::{collections::HashMap, ops::Range};
 
 use egui::{style, widget_text, Color32, ComboBox, Painter, Pos2, Rect, RichText, Sense, Stroke, Style, Vec2, WidgetText};
-
-use parsing::function::Function;
+use crate::parsing::ast::Value;
+use crate::parsing::parser::{parse, tokenize};
 
 fn main() {
+    // println!("{}", parse(tokenize(&"(5+4)*3".to_string())).unwrap());
     let icon = eframe::icon_data::from_png_bytes(include_bytes!("graphing_calc_icon.png")).expect("Icon image is invalid.");
 
     let options = eframe::NativeOptions {
@@ -29,7 +29,7 @@ fn main() {
         })
     ).unwrap_or_else(|error| {
         println!("{}", error.to_string());
-    })
+    });
 }
 
 struct GraphApp {
@@ -45,7 +45,7 @@ struct GraphApp {
 
     origin_ui: Pos2,
 
-    function: Function,
+    function_value: Box<Value>,
     function_str: String,
 
     drag_offset: Pos2,
@@ -69,7 +69,7 @@ impl Default for GraphApp {
 
             origin_ui: Pos2::new(0.0, 0.0),
 
-            function: Function::new("x*x").unwrap(),
+            function_value: Box::new(Value::Variable(0)),
             function_str: String::from("x*x"),
 
             drag_offset: Pos2::ZERO,
@@ -117,10 +117,13 @@ impl eframe::App for GraphApp {
                     if ui.text_edit_singleline(&mut self.function_str)
                         .labelled_by(equation_label.id)
                         .changed() {
-                        let new_func = Function::new(&self.function_str);
+                        let new_func = parse(tokenize(&self.function_str));
                         match new_func {
-                            Some(func) => self.function = func,
-                            None => ()
+                            Ok(func) => {
+                                println!("{:?}", func);
+                                self.function_value = func
+                            },
+                            Err(e) => ()//println!("{}", e)
                         }
                     }
                 })
@@ -173,8 +176,7 @@ impl eframe::App for GraphApp {
             self.draw_grid(painter, rect);
             let top_left_gridspace = self.ui_to_grid(rect.min);
             let bottom_right_gridspace = self.ui_to_grid(rect.max);
-            let func = self.function.clone();
-            self.draw_curve(painter, self.get_function_points(func, top_left_gridspace.x..bottom_right_gridspace.x, 1000.0), (2.0, Color32::RED).into());
+            self.draw_curve(painter, self.get_function_points(&*self.function_value, top_left_gridspace.x..bottom_right_gridspace.x, 1000.0), (2.0, Color32::RED).into());
         });
     }
 }
@@ -293,7 +295,7 @@ impl GraphApp {
         }
     }
 
-    fn get_function_points(&self, func: Function, domain: Range<f32>, resolution: f32) -> Vec<Pos2> {
+    fn get_function_points(&self, func: &Value, domain: Range<f32>, resolution: f32) -> Vec<Pos2> {
         let mut points: Vec<Pos2> = Vec::new();
         let addend = (domain.end - domain.start) / resolution;
 
@@ -301,7 +303,7 @@ impl GraphApp {
         while x < domain.end {
             points.push(Pos2::new(
                 x, 
-                func.eval(x)
+                func.evaluate(&vec![x]),
             ));
             x += addend;
         }
