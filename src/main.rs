@@ -12,7 +12,6 @@ use crate::parsing::ast::Value;
 use crate::parsing::parser::{parse, tokenize};
 
 fn main() {
-    // println!("{}", parse(tokenize(&"(5+4)*3".to_string())).unwrap());
     let icon = eframe::icon_data::from_png_bytes(include_bytes!("graphing_calc_icon.png")).expect("Icon image is invalid.");
 
     let options = eframe::NativeOptions {
@@ -92,7 +91,6 @@ impl eframe::App for GraphApp {
                     ui.selectable_value(&mut selected_option, 1, "Reset Scale");
                 });
                 match selected_option {
-                    -1 => {},
                     0 => {
                         self.origin_ui = (self.grid_size.to_pos2() + self.grid_origin) / 2.0;
                         self.debug_values.insert(
@@ -103,9 +101,7 @@ impl eframe::App for GraphApp {
                     1 => {
                         self.grid_scaling = Vec2::new(80.0, 80.0);
                     },
-                    _ => {
-                        println!("Selected option from Graph dropdown is not valid!");
-                    }
+                    _ => ()
                 }
             });
         });
@@ -123,7 +119,7 @@ impl eframe::App for GraphApp {
                                 println!("{:?}", func);
                                 self.function_value = func
                             },
-                            Err(e) => ()//println!("{}", e)
+                            Err(e) => { ui.colored_label(Color32::from_rgb(255, 0, 0), e); },
                         }
                     }
                 })
